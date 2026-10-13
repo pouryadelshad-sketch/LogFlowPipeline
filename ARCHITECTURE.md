@@ -25,3 +25,18 @@ In Increment 2, the pipeline evolved from transmitting unstructured strings to s
 
 - The attributes map provides an open extension point without breaking the immutability of the record.
 Stages in later weeks can attach custom metadata (e.g., geo-IP locations, user IDs, security flags) that this initial parser knows nothing about.
+
+## Increment 3: Composability & Pipeline Builder
+
+### The Builder Pattern
+Instead of hardcoding a 3-component pipeline, the system now utilizes a `PipelineBuilder` to chain an arbitrary number of stages dynamically. This enables command-line flags to dictate pipeline assembly at runtime.
+
+### Pipeline Stage Ordering Experiment
+As requested, we evaluated the architectural trade-offs of stage placement:
+
+**Scenario A: Filter BEFORE Projection (Recommended)**
+```text
+FileLineSource -> ParserStage -> PredicateFilterStage -> ProjectionStage -> FileSink
+Performance: Highly efficient. The filter immediately discards irrelevant records (e.g., keeping only status >= 400). The Projection stage only spends CPU cycles formatting the small fraction of records that survive the filter.
+
+Correctness: The filter has access to all original data fields to make its decision.

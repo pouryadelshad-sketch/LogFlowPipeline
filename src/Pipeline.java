@@ -1,28 +1,46 @@
+import core.Emitter;
 import core.Sink;
 import core.Source;
 import core.Stage;
-import core.StageException;
 
-public class Pipeline<I, O> {
-    private final Source<I> source;
-    private final Stage<I, O> stage;
-    private final Sink<O> sink;
+import java.util.List;
 
-    public Pipeline(Source<I> source, Stage<I, O> stage, Sink<O> sink) {
+@SuppressWarnings({"rawtypes", "unchecked"})
+public class Pipeline {
+    private final Source source;
+    private final List<Stage> stages;
+    private final Sink sink;
+
+    public Pipeline(Source source, List<Stage> stages, Sink sink) {
         this.source = source;
-        this.stage = stage;
+        this.stages = stages;
         this.sink = sink;
     }
 
     public void run() {
-        stage.open();
-        source.produce(item -> {
-            try {
-                stage.process(item, sink::consume);
-            } catch (StageException e) {
-                System.err.println("Pipeline processing error: " + e.getMessage());
-            }
-        });
-        stage.close();
+        // 1. Open all components
+        for (Stage stage : stages) stage.open();
+        sink.open();
+
+        // 2. Wire the pipeline from back to front (right to left)
+        Emitter currentEmitter = sink::consume;
+        for (int i = stages.size() - 1; i >= 0; i--) {
+            Stage stage = stages.get(i);
+            Emitter next = currentEmitter;
+            currentEmitter = item -> {
+                try {
+                    stage.process(item, next);
+                } catch (Exception e) {
+                    System.err.println("Pipeline process error: " + e.getMessage());
+                }
+            };
+        }
+
+        // 3. Start pulling data from the source
+        source.produce(currentEmitter);
+
+        // 4. Close all components (Critical for FileSink to save data)
+        for (Stage stage : stages) stage.close();
+        sink.close();
     }
 }
