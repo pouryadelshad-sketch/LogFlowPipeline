@@ -40,3 +40,18 @@ FileLineSource -> ParserStage -> PredicateFilterStage -> ProjectionStage -> File
 Performance: Highly efficient. The filter immediately discards irrelevant records (e.g., keeping only status >= 400). The Projection stage only spends CPU cycles formatting the small fraction of records that survive the filter.
 
 Correctness: The filter has access to all original data fields to make its decision.
+
+## Increment 4: Configuration-Driven Pipeline & Registry
+
+### Configuration Schema (YAML)
+The pipeline topology is now defined declaratively using YAML. The schema requires a single `pipeline` root node containing:
+- `name`: Identifier for the pipeline job.
+- `source`: Type and parameters (e.g., file path).
+- `stages`: A list of pipeline stages, defined by their `type` (e.g., `parse`, `filter`) and arbitrary `params`.
+- `sink`: Output destination type and parameters.
+
+### Stage Registry (The Plugin Architecture)
+We eliminated hardcoded `switch` statements for stage selection. Instead, the system uses a `StageRegistry` mapping string identifiers (like "parse") to functional `StageFactory` implementations. This allows new filters or processors to be registered strictly at runtime in `ExtensionRegistry.java` without modifying the core pipeline code (Open/Closed Principle).
+
+### Configuration Loader
+`PipelineLoader` utilizes `SnakeYAML` to deserialize the configuration file into nested Java Maps. It walks the configuration tree, validates mandatory parameters, retrieves the necessary factories from the `StageRegistry`, and constructs a finalized `Pipeline` object via the `PipelineBuilder`.
