@@ -1,7 +1,7 @@
 package core;
 
 public interface Sink<I> {
+    default void open() {}
     void consume(I item);
-    default void open() { }
-    default void close() { }
+    default void close() {}
 }

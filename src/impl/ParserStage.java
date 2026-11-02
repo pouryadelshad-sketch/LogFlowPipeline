@@ -1,6 +1,7 @@
 package impl;
 
 import core.Emitter;
+import core.ErrorPolicy;
 import core.LogRecord;
 import core.Stage;
 import core.StageException;
@@ -15,8 +16,6 @@ import java.util.regex.Pattern;
 
 public class ParserStage implements Stage<String, LogRecord> {
 
-    // Matches: IP, timestamp, method, path, status, bytes, and optional user agent
-    // \s+ handles multiple spaces between tokens
     private static final Pattern CLF_PATTERN = Pattern.compile(
             "^(\\S+)\\s+\\S+\\s+\\S+\\s+\\[([^\\]]+)\\]\\s+\"(\\S+)\\s+(\\S+)\\s+[^\"]*\"\\s+(\\S+)\\s+(\\S+)(?:\\s+\"[^\"]*\"\\s+\"([^\"]*)\")?.*$"
     );
@@ -24,19 +23,34 @@ public class ParserStage implements Stage<String, LogRecord> {
     private static final DateTimeFormatter DATE_FORMATTER =
             DateTimeFormatter.ofPattern("dd/MMM/yyyy:HH:mm:ss Z", Locale.ENGLISH);
 
-    private int malformedCount = 0;
+    private final ErrorPolicy errorPolicy;
+
+    // Default constructor for compatibility
+    public ParserStage() {
+        this.errorPolicy = ErrorPolicy.FAIL_FAST;
+    }
+
+    // New constructor to support YAML error policies
+    public ParserStage(ErrorPolicy errorPolicy) {
+        this.errorPolicy = errorPolicy;
+    }
 
     @Override
-    public void process(String input, Emitter<LogRecord> out) throws StageException {
+    public ErrorPolicy getErrorPolicy() {
+        return this.errorPolicy;
+    }
+
+    @Override
+    public void process(String input, Emitter<LogRecord> out) {
+        // We safely ignore completely empty lines (like at the end of a file)
         if (input == null || input.trim().isEmpty()) {
-            malformedCount++;
             return;
         }
 
         Matcher matcher = CLF_PATTERN.matcher(input.trim());
         if (!matcher.matches()) {
-            malformedCount++;
-            return;
+            // PHASE 5: Throw StageException instead of silently skipping
+            throw new StageException("Line does not match Common Log Format", "Parser", input, null);
         }
 
         try {
@@ -48,39 +62,25 @@ public class ParserStage implements Stage<String, LogRecord> {
             String rawBytes = matcher.group(6);
             String userAgent = matcher.group(7) != null ? matcher.group(7) : "-";
 
-            // Parse and validate timestamp
             Instant timestamp = OffsetDateTime.parse(rawDate, DATE_FORMATTER).toInstant();
 
-            // Parse and validate status (must be valid 3-digit HTTP status code)
             int status = Integer.parseInt(rawStatus);
             if (status < 100 || status > 599) {
-                malformedCount++;
-                return;
+                // PHASE 5: Throw StageException on bad data
+                throw new StageException("Invalid HTTP status code: " + status, "Parser", input, null);
             }
 
-            // Parse byte size ("-" indicates 0 bytes in CLF)
             long bytes = "-".equals(rawBytes) ? 0 : Long.parseLong(rawBytes);
 
             LogRecord record = new LogRecord(
-                    timestamp,
-                    ip,
-                    method,
-                    path,
-                    status,
-                    bytes,
-                    userAgent,
-                    null,
-                    input
+                    timestamp, ip, method, path, status, bytes, userAgent, null, input
             );
 
             out.emit(record);
 
         } catch (DateTimeParseException | NumberFormatException e) {
-            malformedCount++;
+            // PHASE 5: Catch format errors and wrap them in a StageException
+            throw new StageException("Failed to parse numeric or date fields: " + e.getMessage(), "Parser", input, e);
         }
-    }
-
-    public int getMalformedCount() {
-        return malformedCount;
     }
 }

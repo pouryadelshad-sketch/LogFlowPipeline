@@ -1,7 +1,11 @@
-import core.Emitter;
+import core.ErrorPolicy;
+import core.FailedRecord;
+import core.PipelineException;
+import core.RunSummary;
 import core.Sink;
 import core.Source;
 import core.Stage;
+import core.StageException;
 
 import java.util.List;
 
@@ -9,38 +13,80 @@ import java.util.List;
 public class Pipeline {
     private final Source source;
     private final List<Stage> stages;
-    private final Sink sink;
+    private final Sink mainSink;
+    private final Sink deadLetterSink;
+    private final RunSummary summary;
 
-    public Pipeline(Source source, List<Stage> stages, Sink sink) {
+    public Pipeline(Source source, List<Stage> stages, Sink mainSink, Sink deadLetterSink) {
         this.source = source;
         this.stages = stages;
-        this.sink = sink;
+        this.mainSink = mainSink;
+        this.deadLetterSink = deadLetterSink;
+        this.summary = new RunSummary();
     }
 
     public void run() {
-        // 1. Open all components
-        for (Stage stage : stages) stage.open();
-        sink.open();
+        summary.startTimer();
 
-        // 2. Wire the pipeline from back to front (right to left)
-        Emitter currentEmitter = sink::consume;
-        for (int i = stages.size() - 1; i >= 0; i--) {
-            Stage stage = stages.get(i);
-            Emitter next = currentEmitter;
-            currentEmitter = item -> {
-                try {
-                    stage.process(item, next);
-                } catch (Exception e) {
-                    System.err.println("Pipeline process error: " + e.getMessage());
+        try {
+            source.open();
+            mainSink.open();
+            if (deadLetterSink != null) deadLetterSink.open();
+
+            while (source.hasNext()) {
+                Object currentData = source.next();
+                summary.incrementIncoming();
+
+                boolean dropped = false;
+
+                for (Stage stage : stages) {
+                    Object[] outputHolder = new Object[1];
+
+                    try {
+                        stage.process(currentData, out -> outputHolder[0] = out);
+
+                        if (outputHolder[0] == null) {
+                            dropped = true;
+                            break;
+                        }
+                        currentData = outputHolder[0];
+
+                    } catch (StageException e) {
+                        handleStageError(e, stage);
+                        dropped = true;
+                        break;
+                    } catch (Exception e) {
+                        throw new PipelineException("Fatal unexpected error in pipeline", e);
+                    }
                 }
-            };
+
+                if (!dropped) {
+                    mainSink.consume(currentData); // Fixed method name
+                    summary.incrementOutgoing();
+                }
+            }
+        } finally {
+            source.close();
+            mainSink.close();
+            if (deadLetterSink != null) deadLetterSink.close();
+
+            summary.stopTimer();
+            summary.printReport();
         }
+    }
 
-        // 3. Start pulling data from the source
-        source.produce(currentEmitter);
+    private void handleStageError(StageException e, Stage stage) {
+        summary.recordDrop(e.getStageName());
+        ErrorPolicy policy = stage.getErrorPolicy();
 
-        // 4. Close all components (Critical for FileSink to save data)
-        for (Stage stage : stages) stage.close();
-        sink.close();
+        if (policy == ErrorPolicy.FAIL_FAST) {
+            throw new PipelineException("Pipeline failed fast due to error at stage: " + e.getStageName(), e);
+        } else if (policy == ErrorPolicy.DEAD_LETTER) {
+            summary.incrementDeadLetter();
+            if (deadLetterSink != null) {
+                FailedRecord fr = new FailedRecord(e.getRawData(), e.getStageName(), e);
+                deadLetterSink.consume(fr); // Fixed method name
+            }
+        }
     }
 }

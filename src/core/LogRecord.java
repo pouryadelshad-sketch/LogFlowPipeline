@@ -12,11 +12,10 @@ public record LogRecord(
         int status,
         long bytes,
         String userAgent,
-        Map<String, String> attributes, // Extension point for weeks 5-7
-        String raw
+        Map<String, String> attributes,
+        String rawText
 ) {
     public LogRecord {
-        // Ensure attributes cannot be mutated externally
         attributes = attributes == null ? Map.of() : Collections.unmodifiableMap(attributes);
     }
 }

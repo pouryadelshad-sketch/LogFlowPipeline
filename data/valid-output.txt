@@ -1,0 +1,4 @@
+[2026-10-15T10:15:32Z] 192.0.2.10 null /index.html -> HTTP 200 (1234 bytes)
+[2026-10-15T10:16:05Z] 198.51.100.22 null /api/login -> HTTP 401 (287 bytes)
+[2026-10-15T10:17:41Z] 203.0.113.7 null /images/logo.png -> HTTP 304 (0 bytes)
+[2026-10-15T10:21:00Z] 192.0.2.100 null /huge -> HTTP 200 (1 bytes)

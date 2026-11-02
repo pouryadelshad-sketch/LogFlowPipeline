@@ -1,70 +1,73 @@
+import core.FailedRecord;
 import core.Sink;
 import core.Source;
 import core.Stage;
 import core.StageRegistry;
+import impl.DeadLetterFileSink;
 import impl.FileLineSource;
 import impl.FileSink;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.FileInputStream;
 import java.io.InputStream;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 @SuppressWarnings({"unchecked", "rawtypes"})
 public class PipelineLoader {
 
-    public static Pipeline load(String configPath) {
+    public static Pipeline load(String configPath) throws Exception {
         Yaml yaml = new Yaml();
         try (InputStream in = new FileInputStream(configPath)) {
-            // Read YAML file
-            Map<String, Object> root = yaml.load(in);
-            Map<String, Object> pipelineDef = (Map<String, Object>) root.get("pipeline");
+            Map<String, Object> config = yaml.load(in);
+            Map<String, Object> pipelineConfig = (Map<String, Object>) config.get("pipeline");
 
-            if (pipelineDef == null) {
-                throw new IllegalArgumentException("Configuration Error: Missing 'pipeline' root node.");
-            }
-
-            // 1. Create Source
-            Map<String, Object> sourceDef = (Map<String, Object>) pipelineDef.get("source");
-            Map<String, Object> sourceParams = (Map<String, Object>) sourceDef.get("params");
-            if (!sourceDef.containsKey("params") || !sourceParams.containsKey("path")) {
-                throw new IllegalArgumentException("Configuration Error: Source missing 'path' parameter.");
-            }
+            // 1. Load Source
+            Map<String, Object> sourceConfig = (Map<String, Object>) pipelineConfig.get("source");
+            Map<String, Object> sourceParams = (Map<String, Object>) sourceConfig.get("params");
             Source source = new FileLineSource((String) sourceParams.get("path"));
 
-            // 2. Start Builder
             PipelineBuilder builder = PipelineBuilder.from(source);
 
-            // 3. Create and attach Stages
-            List<Map<String, Object>> stagesDef = (List<Map<String, Object>>) pipelineDef.get("stages");
-            if (stagesDef == null || stagesDef.isEmpty()) {
-                throw new IllegalArgumentException("Configuration Error: Pipeline 'stages' list is empty or missing.");
+            // 2. Load Stages (Using raw List to prevent IntelliJ casting errors)
+            Object rawStages = pipelineConfig.get("stages");
+            if (rawStages == null) {
+                throw new IllegalArgumentException("Configuration Error: Pipeline 'stages' list is missing.");
             }
 
-            for (Map<String, Object> stageDef : stagesDef) {
-                String type = (String) stageDef.get("type");
-                Map<String, Object> params = (Map<String, Object>) stageDef.get("params");
-                if (params == null) params = java.util.Collections.emptyMap();
+            List rawList = (List) rawStages;
+            if (rawList.isEmpty()) {
+                throw new IllegalArgumentException("Configuration Error: Pipeline 'stages' list is empty.");
+            }
 
-                // This uses the Registry we built to dynamically build the stage!
-                Stage stage = StageRegistry.createStage(type, params);
+            for (Object item : rawList) {
+                Map<String, Object> stageConfig = (Map<String, Object>) item;
+                String type = (String) stageConfig.get("type");
+
+                Map<String, Object> params = (Map<String, Object>) stageConfig.get("params");
+                if (params == null) {
+                    params = Collections.emptyMap();
+                }
+
+                Stage stage = StageRegistry.get(type).create(params);
                 builder.via(stage);
             }
 
-            // 4. Create Sink and finalize Pipeline
-            Map<String, Object> sinkDef = (Map<String, Object>) pipelineDef.get("sink");
-            Map<String, Object> sinkParams = (Map<String, Object>) sinkDef.get("params");
-            if (!sinkDef.containsKey("params") || !sinkParams.containsKey("path")) {
-                throw new IllegalArgumentException("Configuration Error: Sink missing 'path' parameter.");
+            // 3. Load Main Sink (Raw type to fix generic mismatch)
+            Map<String, Object> sinkConfig = (Map<String, Object>) pipelineConfig.get("sink");
+            Map<String, Object> sinkParams = (Map<String, Object>) sinkConfig.get("params");
+            Sink mainSink = new FileSink((String) sinkParams.get("path"));
+
+            // 4. Load Dead-Letter Sink
+            if (pipelineConfig.containsKey("dead_letter_sink")) {
+                Map<String, Object> dlConfig = (Map<String, Object>) pipelineConfig.get("dead_letter_sink");
+                Map<String, Object> dlParams = (Map<String, Object>) dlConfig.get("params");
+                Sink dlSink = new DeadLetterFileSink((String) dlParams.get("path"));
+                builder.withDeadLetterSink(dlSink);
             }
-            Sink sink = new FileSink((String) sinkParams.get("path"));
 
-            return builder.to(sink);
-
-        } catch (Exception e) {
-            // The assignment requires the app to "fail fast, fail loudly" on configuration errors
-            throw new RuntimeException("Failed to load config: " + e.getMessage(), e);
+            return builder.to(mainSink);
         }
     }
 }

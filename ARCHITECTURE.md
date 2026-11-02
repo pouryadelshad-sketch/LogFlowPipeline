@@ -55,3 +55,20 @@ We eliminated hardcoded `switch` statements for stage selection. Instead, the sy
 
 ### Configuration Loader
 `PipelineLoader` utilizes `SnakeYAML` to deserialize the configuration file into nested Java Maps. It walks the configuration tree, validates mandatory parameters, retrieves the necessary factories from the `StageRegistry`, and constructs a finalized `Pipeline` object via the `PipelineBuilder`.
+
+## Increment 5: Error Management & Dead-Letter Channel
+
+### Error Model Definitions
+We treat error routing as a topological pipeline decision, not just a standard try/catch block.
+* **StageException**: A recoverable, record-level failure (e.g., parsing a malformed string or a negative byte count). The pipeline catches this, routes the specific `FailedRecord` to the configured error policy, and continues processing the next line.
+* **PipelineException**: A fatal, system-level failure (e.g., missing YAML configuration, unreadable input file, disk full). The system cannot recover and must fail fast and loudly, terminating the execution.
+### Chaos Test Error Mapping
+The following table details how the pipeline handles the specific corruptions introduced in `access-dirty.log`:
+
+| Error Type in `access-dirty.log` | Caught By Stage | Configured Policy | Result |
+| :--- | :--- | :--- | :--- |
+| Truncated lines / Regex mismatch | `ParserStage` | `DEAD_LETTER` | Written to `dead-letter.txt` |
+| Negative response bytes (-45) | `ValidationStage` | `DEAD_LETTER` | Written to `dead-letter.txt` |
+| Out-of-bounds timestamp (1970/2099) | `ValidationStage` | `DEAD_LETTER` | Written to `dead-letter.txt` |
+| Non-UTF-8 characters (ÿþú) | `ValidationStage` | `DEAD_LETTER` | Written to `dead-letter.txt` |
+| 100 KiB massive line | `ParserStage` | `DEAD_LETTER` | Written to `dead-letter.txt` |

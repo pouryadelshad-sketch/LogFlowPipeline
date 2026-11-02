@@ -5,15 +5,18 @@ import core.Stage;
 import java.util.ArrayList;
 import java.util.List;
 
-@SuppressWarnings({"rawtypes", "unchecked"})
+@SuppressWarnings({"rawtypes"})
 public class PipelineBuilder {
-    private Source source;
+    private final Source source;
     private final List<Stage> stages = new ArrayList<>();
+    private Sink deadLetterSink; // The new secondary branch!
+
+    private PipelineBuilder(Source source) {
+        this.source = source;
+    }
 
     public static PipelineBuilder from(Source source) {
-        PipelineBuilder builder = new PipelineBuilder();
-        builder.source = source;
-        return builder;
+        return new PipelineBuilder(source);
     }
 
     public PipelineBuilder via(Stage stage) {
@@ -21,7 +24,13 @@ public class PipelineBuilder {
         return this;
     }
 
-    public Pipeline to(Sink sink) {
-        return new Pipeline(source, stages, sink);
+    // New method to attach the dead-letter channel
+    public PipelineBuilder withDeadLetterSink(Sink deadLetterSink) {
+        this.deadLetterSink = deadLetterSink;
+        return this;
+    }
+
+    public Pipeline to(Sink mainSink) {
+        return new Pipeline(source, stages, mainSink, deadLetterSink);
     }
 }

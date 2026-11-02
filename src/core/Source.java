@@ -1,5 +1,8 @@
 package core;
 
 public interface Source<O> {
-    void produce(Emitter<O> out);
+    default void open() {}
+    boolean hasNext();
+    O next();
+    default void close() {}
 }

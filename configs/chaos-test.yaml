@@ -1,0 +1,23 @@
+pipeline:
+  name: chaos-run
+  source:
+    type: file
+    params: { path: data/access-dirty.log }
+  stages:
+    - type: parse
+      params: { errorPolicy: DEAD_LETTER }
+    - type: validate
+      params:
+        errorPolicy: DEAD_LETTER
+        rejectNegativeBytes: true
+        validateTimestampRange: true
+        minYear: 2000
+        maxYear: 2030
+    - type: project
+      params: { fields: [clientIp, timestamp, status, bytes, path] }
+  sink:
+    type: file
+    params: { path: data/valid-output.txt }
+  dead_letter_sink:
+    type: file
+    params: { path: data/dead-letter.txt }
