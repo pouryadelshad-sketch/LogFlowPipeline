@@ -7,7 +7,7 @@ pipeline:
     - type: parse
       params: {}
     - type: filter
-      params: { field: status, op: ">=", value: 400 }
+      params: { field: status, op: ">=", value: 500 }
     - type: project
       params: { fields: [timestamp, clientIp, status, path] }
   sink:

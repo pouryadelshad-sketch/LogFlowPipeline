@@ -7,7 +7,7 @@ pipeline:
     - type: parse
       params: {}
     - type: filter
-      params: { field: path, op: startsWith, value: /api }
+      params: { field: path, op: startsWith, value: /images }
     - type: project
       params: { fields: [timestamp, clientIp, method, path, status] }
   sink:
